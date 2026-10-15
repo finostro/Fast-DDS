@@ -37,10 +37,18 @@ class ParticipantModule : public DomainParticipantListener
 {
 public:
 
+    /**
+     * @param lease_duration Lease duration in seconds, 0 to keep the default.
+     * @param announcement_period Lease announcement period in seconds, 0 to keep the default.
+     * @param topic_name If not empty, a DataWriter is created on this topic.
+     */
     ParticipantModule(
             const std::string& discovery_protocol,
             const std::string& guid_prefix,
-            const std::string& unicast_metatraffic_port);
+            const std::string& unicast_metatraffic_port,
+            double lease_duration = 0,
+            double announcement_period = 0,
+            const std::string& topic_name = "");
 
     ~ParticipantModule();
 
@@ -59,6 +67,9 @@ private:
     DiscoveryProtocol_t discovery_protocol_;
     GuidPrefix_t server_guid_prefix_;
     uint32_t unicast_metatraffic_port_;
+    double lease_duration_ = 0;
+    double announcement_period_ = 0;
+    std::string topic_name_;
 };
 
 } // dds

@@ -396,23 +396,34 @@ private:
 
     /**
      * Schedule the drop of the participants relayed by a removed server, giving them a hold-down time
-     * to be relayed again (e.g. by the same server after restarting)
+     * to be relayed again (e.g. by the same server after restarting).
+     * @param relayed GuidPrefix_t of the participants relayed by the removed server.
+     * @param hold_down Time to wait before dropping them.
      */
     void hold_down_relayed_participants(
             const std::vector<fastrtps::rtps::GuidPrefix_t>& relayed,
             const fastrtps::Duration_t& hold_down);
 
     /**
-     * A participant pending to be dropped has been announced again, so it is alive
+     * A participant pending to be dropped has been announced again, so it is alive.
+     * @param participant_prefix GuidPrefix_t of the announced participant.
      */
     void confirm_relayed_participant(
             const fastrtps::rtps::GuidPrefix_t& participant_prefix);
 
     /**
-     * Drop the participants whose hold-down has expired
-     * @return true if the event must be restarted for the remaining ones
+     * Drop the participants whose hold-down has expired.
+     * @return true if the event must be restarted for the remaining ones.
      */
     bool process_relayed_drops();
+
+    /**
+     * Time until the earliest pending drop. This method must be called from a mutex protected context.
+     * @param now Current time.
+     * @return Interval in milliseconds, rounded up.
+     */
+    double next_relayed_drop_interval_nts_(
+            const std::chrono::steady_clock::time_point& now) const;
 
     //! Discovery database
     fastdds::rtps::ddb::DiscoveryDataBase discovery_db_;

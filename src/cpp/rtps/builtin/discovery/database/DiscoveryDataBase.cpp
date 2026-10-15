@@ -726,6 +726,14 @@ void DiscoveryDataBase::update_participant_from_change_(
 
     assert(ch->kind == eprosima::fastrtps::rtps::ALIVE);
 
+    // Keep track of the last server relaying a non local participant, even if its DATA(p) is not new, so it is the
+    // one whose removal makes the participant pending to be dropped
+    if (!participant_info.is_local() && !change_data.is_local() &&
+            change_data.relayer() != fastrtps::rtps::GuidPrefix_t::unknown())
+    {
+        participant_info.relayer(change_data.relayer());
+    }
+
     // If the change corresponds to a previously removed participant (which hasn't yet been removed from the map since
     // the DATA(Up) is still unacked), update map with new data and behave as if it was a new participant.
     // Remove also the old change from the disposals collection, if it was added just before
@@ -2557,11 +2565,20 @@ bool DiscoveryDataBase::from_json(
             fastrtps::rtps::RemoteLocatorList rll;
             std::istringstream(it.value()["metatraffic_locators"].get<std::string>()) >> rll;
 
+            // Populate relayer, which is not present in backups taken before it was introduced
+            fastrtps::rtps::GuidPrefix_t relayer_aux = fastrtps::rtps::GuidPrefix_t::unknown();
+            auto relayer_it = it.value().find("relayer");
+            if (relayer_it != it.value().end())
+            {
+                std::istringstream(relayer_it->get<std::string>()) >> relayer_aux;
+            }
+
             // Populate DiscoveryParticipantChangeData
             DiscoveryParticipantChangeData dpcd(
                 rll,
                 it.value()["is_client"].get<bool>(),
-                it.value()["is_local"].get<bool>());
+                it.value()["is_local"].get<bool>(),
+                relayer_aux);
 
             // Populate DiscoveryParticipantInfo
             DiscoveryParticipantInfo dpi(change, server_guid_prefix_, dpcd);

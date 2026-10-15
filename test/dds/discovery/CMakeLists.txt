@@ -39,6 +39,8 @@ if(NOT ((MSVC OR MSVC_IDE) AND EPROSIMA_INSTALLER) AND fastcdr_FOUND)
     ###########################################################################
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/client_server_dynamic_discovery.py
         ${CMAKE_CURRENT_BINARY_DIR}/client_server_dynamic_discovery.py COPYONLY)
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/drop_relayed_participants.py
+        ${CMAKE_CURRENT_BINARY_DIR}/drop_relayed_participants.py COPYONLY)
 
     string(RANDOM LENGTH 4 ALPHABET 0123456789 W_UNICAST_PORT_RANDOM_NUMBER)
     math(EXPR W_UNICAST_PORT_RANDOM_NUMBER "${W_UNICAST_PORT_RANDOM_NUMBER} + 0")
@@ -59,5 +61,13 @@ if(NOT ((MSVC OR MSVC_IDE) AND EPROSIMA_INSTALLER) AND fastcdr_FOUND)
             set_property(TEST AddDiscoveryServerToListFromEnvironmentFile APPEND PROPERTY ENVIRONMENT
                 "PATH=$<TARGET_FILE_DIR:${PROJECT_NAME}>\\;$<TARGET_FILE_DIR:fastcdr>\\;${WIN_PATH}")
         endif()
+
+        add_test(NAME DiscoveryServerDropRelayedParticipants
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/drop_relayed_participants.py)
+
+        set_property(TEST DiscoveryServerDropRelayedParticipants PROPERTY ENVIRONMENT
+            "CLIENT_SERVER_DYNAMIC_DISCOVERY_BIN=$<TARGET_FILE:DDSParticipantDiscovery>")
+        set_property(TEST DiscoveryServerDropRelayedParticipants APPEND PROPERTY ENVIRONMENT
+            "W_UNICAST_PORT_RANDOM_NUMBER=${W_UNICAST_PORT_RANDOM_NUMBER}")
     endif()
 endif()

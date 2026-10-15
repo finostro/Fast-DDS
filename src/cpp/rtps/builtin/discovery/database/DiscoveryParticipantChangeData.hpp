@@ -62,6 +62,12 @@ public:
         return relayer_;
     }
 
+    void relayer(
+            const fastrtps::rtps::GuidPrefix_t& relayer)
+    {
+        relayer_ = relayer;
+    }
+
     bool is_client() const
     {
         return is_client_;
@@ -83,6 +89,7 @@ public:
         j["is_client"] = is_client_;
         j["is_local"] = is_local_;
         j["metatraffic_locators"] = object_to_string(metatraffic_locators_);
+        j["relayer"] = object_to_string(relayer_);
     }
 
 private:
@@ -95,7 +102,7 @@ private:
     bool is_client_ = false;
     // Whether this participant (CLIENT OR SERVER) is a client of this server
     bool is_local_ = false;
-    // For a non local participant, the server that relayed its DATA(p) to this server (unknown if not known)
+    // For a non local participant, the last server that relayed its DATA(p) to this server (unknown if not known)
     fastrtps::rtps::GuidPrefix_t relayer_ = fastrtps::rtps::GuidPrefix_t::unknown();
 };
 

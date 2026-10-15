@@ -17,6 +17,7 @@
  *
  */
 
+#include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <mutex>
@@ -1040,6 +1041,24 @@ bool PDPServer::remove_remote_participant(
         ParticipantProxyData* server_data = get_participant_proxy_data(partGUID.guidPrefix);
         hold_down = (nullptr != server_data) ? server_data->m_leaseDuration :
                 mp_RTPSParticipant->getAttributes().builtin.discovery_config.leaseDuration;
+
+        // A BACKUP server restores from its backup the participants it relayed, and considers them already known by
+        // this server, so it does not relay them again after restarting. Keep them as before.
+        if (nullptr != server_data)
+        {
+            auto participant_type = std::find_if(
+                server_data->m_properties.begin(),
+                server_data->m_properties.end(),
+                [](const dds::ParameterProperty_t& property)
+                {
+                    return property.first() == dds::parameter_property_participant_type;
+                });
+            if (participant_type != server_data->m_properties.end() &&
+                    participant_type->second() == ParticipantType::BACKUP)
+            {
+                relayed.clear();
+            }
+        }
     }
 
     // Notify the DiscoveryDataBase on lease duration removal because the listener
@@ -1108,8 +1127,8 @@ void PDPServer::hold_down_relayed_participants(
 {
     std::lock_guard<std::recursive_mutex> lock(*getMutex());
 
-    auto deadline = std::chrono::steady_clock::now() +
-            std::chrono::microseconds(TimeConv::Duration_t2MicroSecondsInt64(hold_down));
+    auto now = std::chrono::steady_clock::now();
+    auto deadline = now + std::chrono::microseconds(TimeConv::Duration_t2MicroSecondsInt64(hold_down));
     for (const GuidPrefix_t& prefix : relayed)
     {
         EPROSIMA_LOG_INFO(RTPS_PDP_SERVER, "Participant " << prefix
@@ -1118,10 +1137,24 @@ void PDPServer::hold_down_relayed_participants(
         relayed_pending_drop_.emplace(prefix, deadline);
     }
 
-    // Trigger the event to schedule the earliest deadline
+    // Schedule the event for the earliest deadline
     relayed_drop_event_->cancel_timer();
-    relayed_drop_event_->update_interval_millisec(0);
+    relayed_drop_event_->update_interval_millisec(next_relayed_drop_interval_nts_(now));
     relayed_drop_event_->restart_timer();
+}
+
+double PDPServer::next_relayed_drop_interval_nts_(
+        const std::chrono::steady_clock::time_point& now) const
+{
+    auto next = std::chrono::steady_clock::time_point::max();
+    for (const auto& pending : relayed_pending_drop_)
+    {
+        next = std::min(next, pending.second);
+    }
+
+    // Round up, so the event is not triggered before the deadline
+    auto interval = std::chrono::duration_cast<std::chrono::milliseconds>(next - now).count() + 1;
+    return static_cast<double>(std::max<decltype(interval)>(interval, 0));
 }
 
 void PDPServer::confirm_relayed_participant(
@@ -1142,7 +1175,6 @@ bool PDPServer::process_relayed_drops()
         std::lock_guard<std::recursive_mutex> lock(*getMutex());
 
         auto now = std::chrono::steady_clock::now();
-        auto next = std::chrono::steady_clock::time_point::max();
         for (auto it = relayed_pending_drop_.begin(); it != relayed_pending_drop_.end();)
         {
             if (it->second <= now)
@@ -1156,15 +1188,14 @@ bool PDPServer::process_relayed_drops()
             }
             else
             {
-                next = std::min(next, it->second);
                 ++it;
             }
         }
 
+        // Restart the event for the earliest remaining deadline
         if (!relayed_pending_drop_.empty())
         {
-            relayed_drop_event_->update_interval_millisec(
-                static_cast<double>(std::chrono::duration_cast<std::chrono::milliseconds>(next - now).count() + 1));
+            relayed_drop_event_->update_interval_millisec(next_relayed_drop_interval_nts_(now));
             restart = true;
         }
     }

@@ -25,19 +25,34 @@
 #include <fastdds/dds/domain/DomainParticipant.hpp>
 #include <fastdds/dds/domain/DomainParticipantFactory.hpp>
 #include <fastdds/dds/domain/qos/DomainParticipantQos.hpp>
+#include <fastdds/dds/publisher/DataWriter.hpp>
+#include <fastdds/dds/publisher/Publisher.hpp>
+#include <fastdds/dds/topic/Topic.hpp>
+#include <fastdds/dds/topic/TypeSupport.hpp>
 #include <fastdds/rtps/attributes/RTPSParticipantAttributes.h>
 #include <fastdds/rtps/common/Locator.h>
 #include <fastdds/rtps/participant/ParticipantDiscoveryInfo.h>
+#include <fastrtps/types/DynamicPubSubType.h>
+#include <fastrtps/types/DynamicTypeBuilder.h>
+#include <fastrtps/types/DynamicTypeBuilderFactory.h>
+#include <fastrtps/types/DynamicTypeBuilderPtr.h>
 #include <fastrtps/utils/IPLocator.h>
 
 using namespace eprosima::fastdds::dds;
 using namespace eprosima::fastdds::rtps;
 using namespace eprosima::fastrtps::rtps;
+using namespace eprosima::fastrtps::types;
 
 ParticipantModule::ParticipantModule(
         const std::string& discovery_protocol,
         const std::string& guid_prefix,
-        const std::string& unicast_metatraffic_port)
+        const std::string& unicast_metatraffic_port,
+        double lease_duration,
+        double announcement_period,
+        const std::string& topic_name)
+    : lease_duration_(lease_duration)
+    , announcement_period_(announcement_period)
+    , topic_name_(topic_name)
 {
     if (discovery_protocol.compare(ParticipantType::SERVER) == 0)
     {
@@ -60,6 +75,7 @@ ParticipantModule::~ParticipantModule()
 {
     if (nullptr != participant_)
     {
+        participant_->delete_contained_entities();
         DomainParticipantFactory::get_instance()->delete_participant(participant_);
     }
 }
@@ -68,6 +84,16 @@ bool ParticipantModule::init()
 {
     DomainParticipantQos participant_qos;
     participant_qos.wire_protocol().builtin.discovery_config.discoveryProtocol = discovery_protocol_;
+    if (0 < lease_duration_)
+    {
+        participant_qos.wire_protocol().builtin.discovery_config.leaseDuration =
+                eprosima::fastrtps::Duration_t(lease_duration_);
+    }
+    if (0 < announcement_period_)
+    {
+        participant_qos.wire_protocol().builtin.discovery_config.leaseDuration_announcementperiod =
+                eprosima::fastrtps::Duration_t(announcement_period_);
+    }
     if (DiscoveryProtocol_t::SERVER == discovery_protocol_)
     {
         participant_qos.wire_protocol().prefix = server_guid_prefix_;
@@ -81,6 +107,24 @@ bool ParticipantModule::init()
     if (nullptr == participant_)
     {
         return false;
+    }
+
+    // Discovery servers only relay participants with endpoints
+    if (!topic_name_.empty())
+    {
+        DynamicTypeBuilder_ptr builder(DynamicTypeBuilderFactory::get_instance()->create_struct_builder());
+        builder->set_name("ParticipantModuleType");
+        builder->add_member(0, "value", DynamicTypeBuilderFactory::get_instance()->create_int32_type());
+        TypeSupport type(new DynamicPubSubType(builder->build()));
+        Publisher* publisher = participant_->create_publisher(PUBLISHER_QOS_DEFAULT);
+        Topic* topic = nullptr;
+        if (ReturnCode_t::RETCODE_OK != type.register_type(participant_) ||
+                nullptr == publisher ||
+                nullptr == (topic = participant_->create_topic(topic_name_, type.get_type_name(), TOPIC_QOS_DEFAULT)) ||
+                nullptr == publisher->create_datawriter(topic, DATAWRITER_QOS_DEFAULT))
+        {
+            return false;
+        }
     }
     return true;
 }

@@ -105,6 +105,12 @@ public:
         return participant_change_data_.relayer();
     }
 
+    void relayer(
+            const fastrtps::rtps::GuidPrefix_t& relayer)
+    {
+        participant_change_data_.relayer(relayer);
+    }
+
     void participant_change_data(
             const DiscoveryParticipantChangeData& new_participant_change_data)
     {

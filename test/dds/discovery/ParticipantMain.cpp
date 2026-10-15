@@ -18,6 +18,7 @@
 
 #include <condition_variable>
 #include <csignal>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <mutex>
@@ -35,6 +36,9 @@ using Log = eprosima::fastdds::dds::Log;
  * --guid_prefix <str>
  * --discovery_protocol <str>
  * --unicast_metatraffic_locator <str>
+ * --lease_duration <seconds>
+ * --announcement_period <seconds>
+ * --topic <str>
  */
 
 volatile sig_atomic_t signal_status = 0;
@@ -60,6 +64,9 @@ int main(
     std::string guid_prefix;
     std::string discovery_protocol;
     std::string unicast_metatraffic_locator;
+    double lease_duration = 0;
+    double announcement_period = 0;
+    std::string topic_name;
 
     while (arg_count < argc)
     {
@@ -90,6 +97,33 @@ int main(
             }
             unicast_metatraffic_locator = argv[arg_count];
         }
+        else if (strcmp(argv[arg_count], "--lease_duration") == 0)
+        {
+            if (++arg_count >= argc)
+            {
+                std::cout << "--lease_duration expects a parameter\n";
+                return -1;
+            }
+            lease_duration = strtod(argv[arg_count], nullptr);
+        }
+        else if (strcmp(argv[arg_count], "--announcement_period") == 0)
+        {
+            if (++arg_count >= argc)
+            {
+                std::cout << "--announcement_period expects a parameter\n";
+                return -1;
+            }
+            announcement_period = strtod(argv[arg_count], nullptr);
+        }
+        else if (strcmp(argv[arg_count], "--topic") == 0)
+        {
+            if (++arg_count >= argc)
+            {
+                std::cout << "--topic expects a parameter\n";
+                return -1;
+            }
+            topic_name = argv[arg_count];
+        }
         else
         {
             std::cout << "Wrong argument " << argv[arg_count] << std::endl;
@@ -98,7 +132,8 @@ int main(
         ++arg_count;
     }
 
-    eprosima::fastdds::dds::ParticipantModule participant(discovery_protocol, guid_prefix, unicast_metatraffic_locator);
+    eprosima::fastdds::dds::ParticipantModule participant(discovery_protocol, guid_prefix, unicast_metatraffic_locator,
+            lease_duration, announcement_period, topic_name);
 
     if (participant.init())
     {
