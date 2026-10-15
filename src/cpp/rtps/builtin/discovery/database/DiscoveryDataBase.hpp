@@ -278,6 +278,11 @@ public:
     // return a list of participants that are not the server one
     const std::vector<fastrtps::rtps::GuidPrefix_t> remote_participants();
 
+    // return the alive participants that were relayed to this server by the given remote server.
+    // Empty if the given prefix is not a known remote server.
+    const std::vector<fastrtps::rtps::GuidPrefix_t> participants_relayed_by(
+            const fastrtps::rtps::GuidPrefix_t& server_prefix);
+
     // set if the server has been acked by all the reader proxys in server
     bool server_acked_by_all() const
     {

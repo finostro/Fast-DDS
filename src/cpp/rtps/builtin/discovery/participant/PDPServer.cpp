@@ -67,6 +67,7 @@ PDPServer::PDPServer(
     : PDP(builtin, allocation)
     , routine_(nullptr)
     , ping_(nullptr)
+    , relayed_drop_event_(nullptr)
     , discovery_db_(builtin->mp_participantImpl->getGuid().guidPrefix,
             servers_prefixes())
     , durability_ (durability_kind)
@@ -96,6 +97,7 @@ PDPServer::~PDPServer()
     // Stop timed events
     routine_->cancel_timer();
     ping_->cancel_timer();
+    relayed_drop_event_->cancel_timer();
 
     // Disable database
     discovery_db_.disable();
@@ -103,6 +105,7 @@ PDPServer::~PDPServer()
     // Delete timed events
     delete(routine_);
     delete(ping_);
+    delete(relayed_drop_event_);
 
     // Clear ddb and release its changes
     process_changes_release_(discovery_db_.clear());
@@ -181,6 +184,12 @@ bool PDPServer::init(
                     TimeConv::Duration_t2MilliSecondsDouble(
                         m_discovery.discovery_config.discoveryServer_client_syncperiod));
     ping_->restart_timer();
+
+    relayed_drop_event_ = new TimedEvent(resource_event_thread_,
+                    [this]() -> bool
+                    {
+                        return process_relayed_drops();
+                    }, 0);
 
     // Restoring the queue must be done after starting the routine
     if (durability_ == TRANSIENT)
@@ -1019,6 +1028,20 @@ bool PDPServer::remove_remote_participant(
 {
     auto endpoints = static_cast<fastdds::rtps::DiscoveryServerPDPEndpoints*>(builtin_endpoints_.get());
 
+    // If a remote server is gone, nobody will report the demise of the participants it relayed to us,
+    // as their liveliness is only asserted to their own server. They are dropped too, unless they are relayed
+    // again within a hold-down of one server lease (e.g. the server restarts and they are still alive).
+    // Collected before removing the server, as the removal may clear the database entries.
+    std::vector<GuidPrefix_t> relayed = discovery_db_.participants_relayed_by(partGUID.guidPrefix);
+    fastrtps::Duration_t hold_down;
+    if (!relayed.empty())
+    {
+        std::lock_guard<std::recursive_mutex> lock(*getMutex());
+        ParticipantProxyData* server_data = get_participant_proxy_data(partGUID.guidPrefix);
+        hold_down = (nullptr != server_data) ? server_data->m_leaseDuration :
+                mp_RTPSParticipant->getAttributes().builtin.discovery_config.leaseDuration;
+    }
+
     // Notify the DiscoveryDataBase on lease duration removal because the listener
     // has already notified the database in all other cases
     if (ParticipantDiscoveryInfo::DROPPED_PARTICIPANT == reason)
@@ -1069,7 +1092,93 @@ bool PDPServer::remove_remote_participant(
     awake_server_thread();
 
     // delegate into the base class for inherited proxy database removal
-    return PDP::remove_remote_participant(partGUID, reason);
+    bool ret = PDP::remove_remote_participant(partGUID, reason);
+
+    if (!relayed.empty())
+    {
+        hold_down_relayed_participants(relayed, hold_down);
+    }
+
+    return ret;
+}
+
+void PDPServer::hold_down_relayed_participants(
+        const std::vector<GuidPrefix_t>& relayed,
+        const fastrtps::Duration_t& hold_down)
+{
+    std::lock_guard<std::recursive_mutex> lock(*getMutex());
+
+    auto deadline = std::chrono::steady_clock::now() +
+            std::chrono::microseconds(TimeConv::Duration_t2MicroSecondsInt64(hold_down));
+    for (const GuidPrefix_t& prefix : relayed)
+    {
+        EPROSIMA_LOG_INFO(RTPS_PDP_SERVER, "Participant " << prefix
+                                                          << " will be dropped unless it is relayed again");
+        // Keep an earlier deadline if the participant was already pending
+        relayed_pending_drop_.emplace(prefix, deadline);
+    }
+
+    // Trigger the event to schedule the earliest deadline
+    relayed_drop_event_->cancel_timer();
+    relayed_drop_event_->update_interval_millisec(0);
+    relayed_drop_event_->restart_timer();
+}
+
+void PDPServer::confirm_relayed_participant(
+        const GuidPrefix_t& participant_prefix)
+{
+    std::lock_guard<std::recursive_mutex> lock(*getMutex());
+    if (relayed_pending_drop_.erase(participant_prefix) > 0)
+    {
+        EPROSIMA_LOG_INFO(RTPS_PDP_SERVER, "Participant " << participant_prefix << " relayed again, not dropped");
+    }
+}
+
+bool PDPServer::process_relayed_drops()
+{
+    std::vector<GuidPrefix_t> expired;
+    bool restart = false;
+    {
+        std::lock_guard<std::recursive_mutex> lock(*getMutex());
+
+        auto now = std::chrono::steady_clock::now();
+        auto next = std::chrono::steady_clock::time_point::max();
+        for (auto it = relayed_pending_drop_.begin(); it != relayed_pending_drop_.end();)
+        {
+            if (it->second <= now)
+            {
+                // Only drop it if it is still known, it may have been removed meanwhile
+                if (nullptr != get_participant_proxy_data(it->first))
+                {
+                    expired.push_back(it->first);
+                }
+                it = relayed_pending_drop_.erase(it);
+            }
+            else
+            {
+                next = std::min(next, it->second);
+                ++it;
+            }
+        }
+
+        if (!relayed_pending_drop_.empty())
+        {
+            relayed_drop_event_->update_interval_millisec(
+                static_cast<double>(std::chrono::duration_cast<std::chrono::milliseconds>(next - now).count() + 1));
+            restart = true;
+        }
+    }
+
+    // Drop outside the lock, as the lease expiration does
+    for (const GuidPrefix_t& prefix : expired)
+    {
+        EPROSIMA_LOG_INFO(RTPS_PDP_SERVER, "Dropping participant " << prefix
+                                                                   << " not relayed again after its server was removed");
+        remove_remote_participant(GUID_t(prefix, c_EntityId_RTPSParticipant),
+                ParticipantDiscoveryInfo::DROPPED_PARTICIPANT);
+    }
+
+    return restart;
 }
 
 bool PDPServer::process_data_queues()

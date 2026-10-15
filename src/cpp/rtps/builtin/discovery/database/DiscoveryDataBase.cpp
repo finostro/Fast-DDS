@@ -1712,6 +1712,34 @@ const std::vector<fastrtps::rtps::GuidPrefix_t> DiscoveryDataBase::direct_client
     return direct_clients_and_servers;
 }
 
+const std::vector<fastrtps::rtps::GuidPrefix_t> DiscoveryDataBase::participants_relayed_by(
+        const fastrtps::rtps::GuidPrefix_t& server_prefix)
+{
+    std::lock_guard<std::recursive_mutex> guard(mutex_);
+
+    std::vector<fastrtps::rtps::GuidPrefix_t> relayed;
+
+    // Only remote servers relay participants
+    auto sit = participants_.find(server_prefix);
+    if (server_prefix == server_guid_prefix_ || sit == participants_.end() || sit->second.is_client())
+    {
+        return relayed;
+    }
+
+    for (auto& participant : participants_)
+    {
+        // The relayer is recorded on reception, as the stored change's writerGUID is later overwritten when this
+        // server relays it in turn
+        if (!participant.second.is_local() &&
+                participant.second.change()->kind == eprosima::fastrtps::rtps::ALIVE &&
+                participant.second.relayer() == server_prefix)
+        {
+            relayed.push_back(participant.first);
+        }
+    }
+    return relayed;
+}
+
 bool DiscoveryDataBase::server_acked_by_my_servers()
 {
     std::lock_guard<std::recursive_mutex> guard(mutex_);

@@ -270,7 +270,8 @@ void PDPServerListener::onNewCacheChangeAdded(
                             ddb::DiscoveryParticipantChangeData(
                                 participant_data.metatraffic_locators,
                                 is_client,
-                                is_local)))
+                                is_local,
+                                is_local ? GuidPrefix_t::unknown() : change->writerGUID.guidPrefix)))
                 {
                     // Remove change from PDP reader history, but do not return it to the pool. From here on, the discovery
                     // database takes ownership of the CacheChange_t. Henceforth there are no references to the change.
@@ -303,6 +304,10 @@ void PDPServerListener::onNewCacheChangeAdded(
 
             // Grant atomic access to PDP inherited proxies database
             std::unique_lock<std::recursive_mutex> lock(*pdp_server()->getMutex());
+
+            // If this participant was relayed by a server that has been removed, it is alive as it has been
+            // announced again (relayed by the restarted server, by another one, or by itself)
+            pdp_server()->confirm_relayed_participant(guid.guidPrefix);
 
             // Check if participant proxy already exists (means the DATA(p) brings updated info)
             ParticipantProxyData* pdata = nullptr;

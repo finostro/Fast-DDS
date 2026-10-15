@@ -23,6 +23,8 @@
 
 #include <fastdds/rtps/builtin/discovery/participant/PDP.h>
 
+#include <chrono>
+#include <map>
 #include <set>
 #include <sstream>
 #include <string>
@@ -31,6 +33,7 @@
 #include <fastdds/rtps/attributes/ServerAttributes.h>
 #include <fastdds/rtps/history/History.h>
 #include <fastdds/rtps/resources/ResourceEvent.h>
+#include <fastdds/rtps/resources/TimedEvent.h>
 #include <rtps/builtin/discovery/database/DiscoveryDataBase.hpp>
 #include <rtps/builtin/discovery/database/DiscoveryDataFilter.hpp>
 #include <rtps/builtin/discovery/participant/timedevent/DServerEvent.hpp>
@@ -379,6 +382,37 @@ private:
      * TimedEvent for server ping to other servers
      */
     DServerPingEvent* ping_;
+
+    /**
+     * Participants relayed by a removed server, and the time at which they are dropped unless they are relayed
+     * (or announced) again before. Protected by the PDP mutex.
+     */
+    std::map<fastrtps::rtps::GuidPrefix_t, std::chrono::steady_clock::time_point> relayed_pending_drop_;
+
+    /**
+     * TimedEvent to drop the participants in relayed_pending_drop_
+     */
+    fastrtps::rtps::TimedEvent* relayed_drop_event_;
+
+    /**
+     * Schedule the drop of the participants relayed by a removed server, giving them a hold-down time
+     * to be relayed again (e.g. by the same server after restarting)
+     */
+    void hold_down_relayed_participants(
+            const std::vector<fastrtps::rtps::GuidPrefix_t>& relayed,
+            const fastrtps::Duration_t& hold_down);
+
+    /**
+     * A participant pending to be dropped has been announced again, so it is alive
+     */
+    void confirm_relayed_participant(
+            const fastrtps::rtps::GuidPrefix_t& participant_prefix);
+
+    /**
+     * Drop the participants whose hold-down has expired
+     * @return true if the event must be restarted for the remaining ones
+     */
+    bool process_relayed_drops();
 
     //! Discovery database
     fastdds::rtps::ddb::DiscoveryDataBase discovery_db_;

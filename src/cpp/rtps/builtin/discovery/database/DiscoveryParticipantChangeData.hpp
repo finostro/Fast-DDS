@@ -48,11 +48,18 @@ public:
     DiscoveryParticipantChangeData(
             fastrtps::rtps::RemoteLocatorList metatraffic_locators,
             bool is_client,
-            bool is_local)
+            bool is_local,
+            const fastrtps::rtps::GuidPrefix_t& relayer = fastrtps::rtps::GuidPrefix_t::unknown())
         : metatraffic_locators_(metatraffic_locators)
         , is_client_(is_client)
         , is_local_(is_local)
+        , relayer_(relayer)
     {
+    }
+
+    const fastrtps::rtps::GuidPrefix_t& relayer() const
+    {
+        return relayer_;
     }
 
     bool is_client() const
@@ -88,6 +95,8 @@ private:
     bool is_client_ = false;
     // Whether this participant (CLIENT OR SERVER) is a client of this server
     bool is_local_ = false;
+    // For a non local participant, the server that relayed its DATA(p) to this server (unknown if not known)
+    fastrtps::rtps::GuidPrefix_t relayer_ = fastrtps::rtps::GuidPrefix_t::unknown();
 };
 
 } /* namespace ddb */
