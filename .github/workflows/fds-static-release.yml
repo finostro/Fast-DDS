@@ -64,21 +64,26 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
-          body: |
-            Statically linked `fast-discovery-server` (Fast DDS 2.14.7) that drops the participants relayed by a
-            removed discovery server, after a hold-down of one lease duration of that server.
-            Only the servers need it: nodes keep the stock ROS 2 Jazzy library.
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          cat > notes.md <<'EOF'
+          Statically linked `fast-discovery-server` (Fast DDS 2.14.7) that drops the participants relayed by a
+          removed discovery server, after a hold-down of one lease duration of that server.
+          Only the servers need it: nodes keep the stock ROS 2 Jazzy library.
 
-            Only glibc stays dynamic: requires glibc >= 2.31 (Ubuntu 20.04+, Jetson JetPack 5+). Built without
-            DDS Security.
+          Only glibc stays dynamic: requires glibc >= 2.31 (Ubuntu 20.04+, Jetson JetPack 5+). Built without
+          DDS Security.
 
-            Usage:
-            ```
-            chmod +x fast-discovery-server-linux-<arch>
-            ROS_DISCOVERY_SERVER="<ipA>:11811;<ipB>:11811" ./fast-discovery-server-linux-<arch> -i <0|1> -p 11811
-            ```
-            Restart a crashed server no sooner than its lease duration + a few seconds (e.g. systemd
-            `RestartSec=23` with the default 20 s lease): a server restarted before its peers drop it is ignored.
+          Usage:
+          ```
+          chmod +x fast-discovery-server-linux-<arch>
+          ROS_DISCOVERY_SERVER="<ipA>:11811;<ipB>:11811" ./fast-discovery-server-linux-<arch> -i <0|1> -p 11811
+          ```
+          Restart a crashed server no sooner than its lease duration + a few seconds (e.g. systemd
+          `RestartSec=23` with the default 20 s lease): a server restarted before its peers drop it is ignored.
+          EOF
+          gh release create "$TAG" dist/* --title "$TAG" --notes-file notes.md --verify-tag
