@@ -1,0 +1,84 @@
+# Builds the statically linked fast-discovery-server for amd64 and arm64 and publishes them as a release.
+# Triggered by pushing a tag named fds-*. The build runs in an Ubuntu 20.04 container so the binaries only
+# need glibc >= 2.31 (Ubuntu 20.04+, Jetson JetPack 5+).
+name: fast-discovery-server static release
+
+on:
+  push:
+    tags:
+      - 'fds-*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    container: ubuntu:20.04
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      - name: Install dependencies
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq build-essential git libssl-dev python3-pip ca-certificates file
+          pip3 install -q "cmake<4"
+
+      - uses: actions/checkout@v4
+        with:
+          path: src
+
+      - name: Build
+        run: src/tools/fds/build_static_fds.sh src work fast-discovery-server-linux-${{ matrix.arch }}
+
+      - name: Check
+        run: |
+          BIN=work/fast-discovery-server-linux-${{ matrix.arch }}
+          file "$BIN"
+          "$BIN" --help | head -n 3
+          sha256sum "$BIN" | sed 's| work/| |' > "$BIN.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fast-discovery-server-linux-${{ matrix.arch }}
+          path: |
+            work/fast-discovery-server-linux-${{ matrix.arch }}
+            work/fast-discovery-server-linux-${{ matrix.arch }}.sha256
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          body: |
+            Statically linked `fast-discovery-server` (Fast DDS 2.14.7) that drops the participants relayed by a
+            removed discovery server, after a hold-down of one lease duration of that server.
+            Only the servers need it: nodes keep the stock ROS 2 Jazzy library.
+
+            Only glibc stays dynamic: requires glibc >= 2.31 (Ubuntu 20.04+, Jetson JetPack 5+). Built without
+            DDS Security.
+
+            Usage:
+            ```
+            chmod +x fast-discovery-server-linux-<arch>
+            ROS_DISCOVERY_SERVER="<ipA>:11811;<ipB>:11811" ./fast-discovery-server-linux-<arch> -i <0|1> -p 11811
+            ```
+            Restart a crashed server no sooner than its lease duration + a few seconds (e.g. systemd
+            `RestartSec=23` with the default 20 s lease): a server restarted before its peers drop it is ignored.
